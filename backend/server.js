@@ -50,6 +50,12 @@
       const requestPath = req.path.startsWith('/') ? req.path : `/${req.path}`;
       console.log(`📹 Solicitação de vídeo: ${requestPath}`);
       
+      // Se for uma URL SSH, não processar aqui - deixar para as rotas SSH
+      if (requestPath.includes('/api/videos-ssh/')) {
+        console.log(`🔄 Redirecionando para rota SSH: ${requestPath}`);
+        return next();
+      }
+      
       // Verificar se é um arquivo de vídeo ou playlist
       const isVideoFile = /\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i.test(requestPath);
       const isStreamFile = /\.(m3u8|ts)$/i.test(requestPath);

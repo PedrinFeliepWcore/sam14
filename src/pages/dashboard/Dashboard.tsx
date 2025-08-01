@@ -140,33 +140,7 @@ const Dashboard: React.FC = () => {
       // Verificar se há vídeos SSH disponíveis para melhor qualidade
       const processedVideos = await Promise.all(
         data.map(async (item: any) => {
-          // Tentar usar SSH se disponível
-          try {
-            const sshResponse = await fetch('/api/videos-ssh/list', {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            
-            if (sshResponse.ok) {
-              const sshData = await sshResponse.json();
-              const sshVideo = sshData.videos.find((v: any) => 
-                v.nome === item.videos.nome
-              );
-              
-              if (sshVideo) {
-                return {
-                  ...item,
-                  videos: {
-                    ...item.videos,
-                    url: `/api/videos-ssh/stream/${sshVideo.id}`,
-                    ssh_mode: true
-                  }
-                };
-              }
-            }
-          } catch (error) {
-            console.warn('SSH não disponível, usando modo padrão');
-          }
-          
+          // Sempre usar modo SSH agora
           return item;
         })
       );

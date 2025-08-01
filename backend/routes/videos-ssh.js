@@ -7,6 +7,73 @@ const VideoSSHManager = require('../config/VideoSSHManager');
 
 const router = express.Router();
 
+// PUT /api/videos-ssh/:videoId/rename - Renomear vídeo
+router.put('/:videoId/rename', authMiddleware, async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const { novo_nome } = req.body;
+    const userId = req.user.id;
+    const userLogin = req.user.email.split('@')[0];
+
+    if (!novo_nome || !novo_nome.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Novo nome é obrigatório'
+      });
+    }
+
+    // Decodificar o caminho do vídeo
+    const remotePath = Buffer.from(videoId, 'base64').toString();
+    
+    // Verificar se o vídeo pertence ao usuário
+    if (!remotePath.includes(`/${userLogin}/`)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Acesso negado'
+      });
+    }
+
+    // Buscar servidor do usuário
+    const [serverRows] = await db.execute(
+      'SELECT codigo_servidor FROM streamings WHERE codigo_cliente = ? LIMIT 1',
+      [userId]
+    );
+
+    const serverId = serverRows.length > 0 ? serverRows[0].codigo_servidor : 1;
+
+    // Construir novo caminho
+    const pathParts = remotePath.split('/');
+    const oldFileName = pathParts[pathParts.length - 1];
+    const fileExtension = path.extname(oldFileName);
+    const newFileName = novo_nome.trim() + fileExtension;
+    
+    pathParts[pathParts.length - 1] = newFileName;
+    const newRemotePath = pathParts.join('/');
+
+    // Renomear arquivo no servidor
+    const renameCommand = `mv "${remotePath}" "${newRemotePath}"`;
+    await SSHManager.executeCommand(serverId, renameCommand);
+
+    console.log(`✅ Vídeo renomeado: ${oldFileName} → ${newFileName}`);
+
+    res.json({
+      success: true,
+      message: 'Vídeo renomeado com sucesso',
+      old_name: oldFileName,
+      new_name: newFileName,
+      new_path: newRemotePath
+    });
+
+  } catch (error) {
+    console.error('Erro ao renomear vídeo:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao renomear vídeo',
+      details: error.message
+    });
+  }
+});
+
 // GET /api/videos-ssh/list - Lista vídeos diretamente do servidor via SSH
 router.get('/list', authMiddleware, async (req, res) => {
   try {

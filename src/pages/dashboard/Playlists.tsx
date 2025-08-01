@@ -88,6 +88,11 @@ const Playlists: React.FC = () => {
       return url;
     }
     
+    // Para vídeos SSH, usar a URL diretamente
+    if (video.url.includes('/api/videos-ssh/')) {
+      return video.url;
+    }
+
     // Para arquivos locais, sempre usar o proxy /content do backend
     const cleanPath = url.replace(/^\/+/, ''); // Remove barras iniciais
     return `/content/${cleanPath}`;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { toast } from "react-toastify";
-import { Play, Trash2, RefreshCw, HardDrive, Download, Eye } from "lucide-react";
+import { Play, Trash2, RefreshCw, HardDrive, Download, Eye, Edit2, Save, X } from "lucide-react";
 import UniversalVideoPlayer from "../../components/UniversalVideoPlayer";
 import { Maximize, Minimize, X } from "lucide-react";
 
@@ -37,6 +37,12 @@ type SSHVideo = {
   lastModified: string;
   serverId: number;
   userLogin: string;
+};
+
+type EditingVideo = {
+  id: string;
+  nome: string;
+  originalNome: string;
 };
 
 type CacheStatus = {
@@ -311,7 +317,6 @@ export default function GerenciarVideos() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folderSelecionada, setFolderSelecionada] = useState<Folder | null>(null);
   const [novoFolderNome, setNovoFolderNome] = useState("");
-  const [videos, setVideos] = useState<Video[]>([]);
   const [uploadFiles, setUploadFiles] = useState<FileList | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -319,11 +324,11 @@ export default function GerenciarVideos() {
   const [videoModalAtual, setVideoModalAtual] = useState<Video | null>(null);
   const [playlistModal, setPlaylistModal] = useState<Video[] | null>(null);
   
-  // Estados para SSH
-  const [useSSHMode, setUseSSHMode] = useState(false);
+  // Estados para SSH (sempre ativo agora)
   const [sshVideos, setSSHVideos] = useState<SSHVideo[]>([]);
   const [loadingSSH, setLoadingSSH] = useState(false);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
+  const [editingVideo, setEditingVideo] = useState<EditingVideo | null>(null);
 
   // Estados para confirmação
   const [modalConfirmacao, setModalConfirmacao] = useState({
@@ -342,16 +347,11 @@ export default function GerenciarVideos() {
 
   useEffect(() => {
     if (folderSelecionada) {
-      if (useSSHMode) {
-        fetchSSHVideos(folderSelecionada.nome);
-      } else {
-        fetchVideos(folderSelecionada.id);
-      }
+      fetchSSHVideos(folderSelecionada.nome);
     } else {
-      setVideos([]);
       setSSHVideos([]);
     }
-  }, [folderSelecionada, useSSHMode]);
+  }, [folderSelecionada]);
 
   const fetchFolders = async () => {
     try {
@@ -436,22 +436,6 @@ export default function GerenciarVideos() {
     }
   };
 
-  const fetchVideos = async (folder_id: number) => {
-    try {
-      const token = await getToken();
-      const response = await fetch(`/api/videos?folder_id=${folder_id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error();
-      const data = await response.json();
-      console.log('Vídeos carregados:', data);
-      setVideos(Array.isArray(data) ? data : []);
-    } catch {
-      toast.error("Erro ao carregar vídeos");
-      setVideos([]);
-    }
-  };
-
   const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -520,14 +504,11 @@ export default function GerenciarVideos() {
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
               const videoData = JSON.parse(xhr.responseText);
-              setVideos(prev => [...prev, {
-                ...videoData,
-                nome: file.name,
-                duracao,
-                tamanho: file.size,
-                url: videoData.url || ""
-              }]);
               toast.success(`${file.name} enviado com sucesso!`);
+              // Recarregar lista SSH após upload
+              if (folderSelecionada) {
+                fetchSSHVideos(folderSelecionada.nome);
+              }
               resolve();
             } else {
               toast.error(`Erro ao enviar ${file.name}`);
@@ -628,24 +609,10 @@ export default function GerenciarVideos() {
         setFolders(prev => prev.filter(f => f.id !== item.id));
         if (folderSelecionada?.id === item.id) {
           setFolderSelecionada(null);
-          setVideos([]);
+          setSSHVideos([]);
         }
         toast.success("Pasta excluída com sucesso!");
 
-      } else if (tipo === 'video') {
-        const response = await fetch(`/api/videos/${item.id}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` }
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          toast.error(errorData.details || errorData.error || "Erro ao excluir vídeo");
-          return;
-        }
-
-        setVideos(prev => prev.filter(v => v.id !== item.id));
-        toast.success("Vídeo excluído com sucesso!");
       } else if (tipo === 'video' && item.id && typeof item.id === 'string') {
         // Deletar vídeo SSH
         const response = await fetch(`/api/videos-ssh/${item.id}`, {
@@ -677,19 +644,57 @@ export default function GerenciarVideos() {
     }
   };
 
+  const startEditingVideo = (video: SSHVideo) => {
+    setEditingVideo({
+      id: video.id,
+      nome: video.nome,
+      originalNome: video.nome
+    });
+  };
+
+  const saveVideoEdit = async () => {
+    if (!editingVideo) return;
+
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/videos-ssh/${editingVideo.id}/rename`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          novo_nome: editingVideo.nome
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao renomear vídeo');
+        return;
+      }
+
+      toast.success('Vídeo renomeado com sucesso!');
+      setEditingVideo(null);
+      
+      // Recarregar lista
+      if (folderSelecionada) {
+        fetchSSHVideos(folderSelecionada.nome);
+      }
+    } catch (error) {
+      console.error('Erro ao renomear vídeo:', error);
+      toast.error('Erro ao renomear vídeo');
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingVideo(null);
+  };
+
   const abrirModalVideo = (video: Video) => {
     console.log('Abrindo modal para vídeo:', video);
     
-    // Converter SSHVideo para Video se necessário
-    const videoData: Video = {
-      id: typeof video.id === 'string' ? parseInt(video.id) || 0 : video.id,
-      nome: video.nome,
-      url: typeof video.id === 'string' ? `/api/videos-ssh/stream/${video.id}` : video.url,
-      duracao: video.duracao,
-      tamanho: video.tamanho
-    };
-    
-    setVideoModalAtual(videoData);
+    setVideoModalAtual(video);
     setPlaylistModal(null);
     setModalAberta(true);
   };
@@ -697,14 +702,13 @@ export default function GerenciarVideos() {
   const abrirModalPlaylist = () => {
     if (!folderSelecionada) return;
     
-    const videosParaPlaylist = useSSHMode ? 
-      sshVideos.map(v => ({
-        id: 0,
-        nome: v.nome,
-        url: `/api/videos-ssh/stream/${v.id}`,
-        duracao: v.duration,
-        tamanho: v.size
-      })) : videos;
+    const videosParaPlaylist = sshVideos.map(v => ({
+      id: 0,
+      nome: v.nome,
+      url: `/api/videos-ssh/stream/${v.id}`,
+      duracao: v.duration,
+      tamanho: v.size
+    }));
     
     console.log('Abrindo playlist modal com vídeos:', videosParaPlaylist);
     setPlaylistModal(videosParaPlaylist);
@@ -715,33 +719,19 @@ export default function GerenciarVideos() {
   return (
     <>
       <div className="max-w-7xl mx-auto p-6 flex flex-col md:flex-row gap-8 min-h-[700px]">
-        {/* Controles de Modo e Cache */}
+        {/* Controles de Cache */}
         <div className="w-full mb-4">
           <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center space-x-4">
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={useSSHMode}
-                    onChange={(e) => setUseSSHMode(e.target.checked)}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <span className="text-sm font-medium text-gray-700">
-                    Modo SSH (Acesso direto ao servidor)
-                  </span>
-                </label>
-                
-                {useSSHMode && (
-                  <button
-                    onClick={() => folderSelecionada && fetchSSHVideos(folderSelecionada.nome)}
-                    disabled={loadingSSH}
-                    className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${loadingSSH ? 'animate-spin' : ''}`} />
-                    <span>Atualizar</span>
-                  </button>
-                )}
+              <div className="flex items-center space-x-4">                
+                <button
+                  onClick={() => folderSelecionada && fetchSSHVideos(folderSelecionada.nome)}
+                  disabled={loadingSSH}
+                  className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
+                >
+                  <RefreshCw className={`h-4 w-4 ${loadingSSH ? 'animate-spin' : ''}`} />
+                  <span>Atualizar Lista</span>
+                </button>
               </div>
               
               {cacheStatus && (
@@ -763,14 +753,12 @@ export default function GerenciarVideos() {
               )}
             </div>
             
-            {useSSHMode && (
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                <p className="text-blue-800 text-sm">
-                  <strong>Modo SSH Ativo:</strong> Os vídeos são acessados diretamente do servidor Wowza. 
-                  Primeira reprodução pode ser mais lenta devido ao download, mas oferece melhor qualidade e confiabilidade.
-                </p>
-              </div>
-            )}
+            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+              <p className="text-blue-800 text-sm">
+                <strong>Modo SSH Ativo:</strong> Os vídeos são acessados diretamente do servidor Wowza. 
+                Primeira reprodução pode ser mais lenta devido ao download, mas oferece melhor qualidade e confiabilidade.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -798,9 +786,9 @@ export default function GerenciarVideos() {
                       e.stopPropagation();
                       abrirModalPlaylist();
                     }}
-                    title={`Assistir todos os vídeos da pasta ${folder.nome} ${useSSHMode ? '(SSH)' : ''}`}
+                    title={`Assistir todos os vídeos da pasta ${folder.nome} (SSH)`}
                     className="text-blue-600 hover:text-blue-800 transition-colors duration-200"
-                    disabled={useSSHMode ? sshVideos.length === 0 : videos.length === 0}
+                    disabled={sshVideos.length === 0}
                   >
                     <Play size={20} />
                   </button>
@@ -841,38 +829,34 @@ export default function GerenciarVideos() {
         {/* Seção dos Vídeos */}
         <section className="md:w-2/3 bg-gray-50 p-6 rounded-lg shadow-md flex flex-col min-h-[500px] border border-gray-300">
           <h2 className="text-2xl font-semibold mb-5 text-gray-900">
-            Vídeos {folderSelecionada ? ` - ${folderSelecionada.nome}` : ""} 
-            {useSSHMode && <span className="text-blue-600 text-sm ml-2">(SSH)</span>}
+            Vídeos {folderSelecionada ? ` - ${folderSelecionada.nome}` : ""}
+            <span className="text-blue-600 text-sm ml-2">(SSH)</span>
           </h2>
           
-          {!useSSHMode && (
-            <>
-              <input
-                type="file"
-                id="input-upload-videos"
-                multiple
-                accept="video/*"
-                onChange={handleFilesChange}
-                disabled={!folderSelecionada || uploading}
-                className="mb-3"
+          <input
+            type="file"
+            id="input-upload-videos"
+            multiple
+            accept="video/*"
+            onChange={handleFilesChange}
+            disabled={!folderSelecionada || uploading}
+            className="mb-3"
+          />
+          {uploading && (
+            <div className="w-full bg-gray-200 rounded h-4 mb-4 overflow-hidden">
+              <div
+                className="bg-blue-600 h-4 transition-all"
+                style={{ width: `${uploadProgress}%` }}
               />
-              {uploading && (
-                <div className="w-full bg-gray-200 rounded h-4 mb-4 overflow-hidden">
-                  <div
-                    className="bg-blue-600 h-4 transition-all"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-              )}
-              <button
-                onClick={uploadVideos}
-                disabled={!uploadFiles || uploadFiles.length === 0 || uploading || !folderSelecionada}
-                className="bg-blue-600 text-white px-5 py-3 rounded hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200"
-              >
-                {uploading ? "Enviando..." : "Enviar"}
-              </button>
-            </>
+            </div>
           )}
+          <button
+            onClick={uploadVideos}
+            disabled={!uploadFiles || uploadFiles.length === 0 || uploading || !folderSelecionada}
+            className="bg-blue-600 text-white px-5 py-3 rounded hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200"
+          >
+            {uploading ? "Enviando..." : "Enviar"}
+          </button>
 
           <div className="mt-8 flex-grow overflow-auto max-h-[450px]">
             {loadingSSH && (
@@ -888,106 +872,105 @@ export default function GerenciarVideos() {
                   <th className="py-2 px-4">Nome</th>
                   <th className="py-2 px-4 w-28">Duração</th>
                   <th className="py-2 px-4 w-28">Tamanho</th>
-                  {useSSHMode && <th className="py-2 px-4 w-32">Pasta</th>}
+                  <th className="py-2 px-4 w-32">Pasta</th>
                   <th className="py-2 px-4 w-24">Assistir</th>
-                  <th className="py-2 px-4 w-24">Ações</th>
+                  <th className="py-2 px-4 w-32">Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {useSSHMode ? (
-                  sshVideos.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-6 text-center text-gray-500">
-                        {loadingSSH ? 'Carregando...' : 'Nenhum vídeo encontrado no servidor'}
+                {sshVideos.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-gray-500">
+                      {loadingSSH ? 'Carregando...' : 'Nenhum vídeo encontrado no servidor'}
+                    </td>
+                  </tr>
+                ) : (
+                  sshVideos.map((video) => (
+                    <tr
+                      key={video.id}
+                      className="border-b border-gray-200 hover:bg-blue-50"
+                    >
+                      <td className="py-2 px-4 truncate max-w-xs">
+                        {editingVideo?.id === video.id ? (
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="text"
+                              value={editingVideo.nome}
+                              onChange={(e) => setEditingVideo(prev => prev ? {...prev, nome: e.target.value} : null)}
+                              className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveVideoEdit();
+                                if (e.key === 'Escape') cancelEdit();
+                              }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={saveVideoEdit}
+                              className="text-green-600 hover:text-green-800"
+                              title="Salvar"
+                            >
+                              <Save size={16} />
+                            </button>
+                            <button
+                              onClick={cancelEdit}
+                              className="text-red-600 hover:text-red-800"
+                              title="Cancelar"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        ) : (
+                          video.nome
+                        )}
                       </td>
-                    </tr>
-                  ) : (
-                    sshVideos.map((video) => (
-                      <tr
-                        key={video.id}
-                        className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer"
-                        title="Clique para assistir"
-                      >
-                        <td className="py-2 px-4 truncate max-w-xs">{video.nome}</td>
-                        <td className="py-2 px-4">{video.duration ? formatarDuracao(video.duration) : "--"}</td>
-                        <td className="py-2 px-4">{video.size ? formatarTamanho(video.size) : "--"}</td>
-                        <td className="py-2 px-4 text-xs text-gray-500">{video.folder}</td>
-                        <td className="py-2 px-4 text-blue-600 text-center">
+                      <td className="py-2 px-4">{video.duration ? formatarDuracao(video.duration) : "--"}</td>
+                      <td className="py-2 px-4">{video.size ? formatarTamanho(video.size) : "--"}</td>
+                      <td className="py-2 px-4 text-xs text-gray-500">{video.folder}</td>
+                      <td className="py-2 px-4 text-blue-600 text-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            abrirModalVideo({
+                              id: video.id,
+                              nome: video.nome,
+                              url: `/api/videos-ssh/stream/${video.id}`,
+                              duracao: video.duration,
+                              tamanho: video.size
+                            } as Video);
+                          }}
+                          title="Assistir vídeo (via SSH)"
+                          className="hover:text-blue-800 transition-colors duration-200"
+                        >
+                          <Play size={20} />
+                        </button>
+                      </td>
+                      <td className="py-2 px-4 text-center">
+                        <div className="flex items-center justify-center space-x-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              abrirModalVideo({
-                                id: video.id,
-                                nome: video.nome,
-                                url: `/api/videos-ssh/stream/${video.id}`,
-                                duracao: video.duration,
-                                tamanho: video.size
-                              } as Video);
+                              startEditingVideo(video);
                             }}
-                            title="Assistir vídeo (via SSH)"
-                            className="hover:text-blue-800 transition-colors duration-200"
+                            title="Editar nome do vídeo"
+                            className="text-blue-600 hover:text-blue-800 transition-colors duration-200"
+                            disabled={editingVideo?.id === video.id}
                           >
-                            <Play size={20} />
+                            <Edit2 size={16} />
                           </button>
-                        </td>
-                        <td className="py-2 px-4 text-red-600 text-center">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               confirmarDeletarSSHVideo(video);
                             }}
                             title="Excluir vídeo do servidor"
-                            className="hover:text-red-800 transition-colors duration-200"
+                            className="text-red-600 hover:text-red-800 transition-colors duration-200"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} />
                           </button>
-                        </td>
-                      </tr>
-                    ))
-                  )
-                ) : (
-                  videos.map((video) => (
-                  <tr
-                    key={video.id}
-                    className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer"
-                    title="Clique para assistir"
-                  >
-                    <td className="py-2 px-4 truncate max-w-xs">{video.nome}</td>
-                    <td className="py-2 px-4">{video.duracao ? formatarDuracao(video.duracao) : "--"}</td>
-                    <td className="py-2 px-4">{video.tamanho ? formatarTamanho(video.tamanho) : "--"}</td>
-                    <td className="py-2 px-4 text-blue-600 text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          abrirModalVideo(video);
-                        }}
-                        title="Assistir vídeo"
-                        className="hover:text-blue-800 transition-colors duration-200"
-                      >
-                        <Play size={20} />
-                      </button>
-                    </td>
-                    <td className="py-2 px-4 text-red-600 text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          confirmarDeletarVideo(video);
-                        }}
-                        title="Excluir vídeo"
-                        className="hover:text-red-800 transition-colors duration-200"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
+                        </div>
+                      </td>
+                    </tr>
                   ))
-                )}
-                {!useSSHMode && videos.length === 0 && !loadingSSH && (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-gray-500">
-                      Nenhum vídeo nesta pasta
-                    </td>
-                  </tr>
                 )}
               </tbody>
             </table>

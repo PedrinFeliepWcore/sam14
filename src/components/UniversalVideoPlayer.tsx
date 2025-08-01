@@ -90,8 +90,8 @@ const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
       return src;
     }
 
-    // Para vídeos SSH, usar a URL diretamente
-    if (src.startsWith('/api/videos-ssh/')) {
+    // Para vídeos SSH, usar a URL diretamente (não adicionar /content)
+    if (src.includes('/api/videos-ssh/')) {
       return src;
     }
 
@@ -328,7 +328,7 @@ const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
             let errorMsg = `Erro no stream: ${data.details || 'Erro desconhecido'}`;
 
             // Mensagens mais amigáveis para erros SSH
-            if (src.includes('/api/videos-ssh/')) {
+            if (src && src.includes('/api/videos-ssh/')) {
               if (data.details?.includes('404')) {
                 errorMsg = 'Vídeo não encontrado no servidor. Tente atualizar a lista.';
               } else if (data.details?.includes('timeout')) {
@@ -360,7 +360,7 @@ const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
       console.log(`📹 Carregando vídeo ${fileType.toUpperCase()}`);
 
       // Para vídeos SSH, configurar timeout maior
-      if (videoUrl.includes('/api/videos-ssh/')) {
+      if (src && src.includes('/api/videos-ssh/')) {
         video.setAttribute('preload', 'none'); // Não pré-carregar para economizar banda
       }
 
